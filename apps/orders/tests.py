@@ -99,7 +99,7 @@ class OrdersAPITestCase(TestCase):
         """Helper method to set up a cart with items for the test user"""
         self.authenticate_user()
 
-        # Create cart with items
+        # Create cart with items - make sure to use get_or_create
         cart, _ = Cart.objects.get_or_create(user=self.user)
         CartItem.objects.create(cart=cart, product=self.product1, quantity=2)
         CartItem.objects.create(cart=cart, product=self.product2, quantity=1)

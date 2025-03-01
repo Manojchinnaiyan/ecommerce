@@ -110,7 +110,12 @@ class CartItemViewSet(viewsets.GenericViewSet):
     @action(detail=True, methods=["patch"])
     def update_quantity(self, request, pk=None):
         cart_item = self.get_object()
-        serializer = UpdateCartItemSerializer(data=request.data)
+
+        # Add cart_item to serializer context for validation
+        serializer_context = {"cart_item": cart_item}
+        serializer = UpdateCartItemSerializer(
+            data=request.data, context=serializer_context
+        )
 
         if serializer.is_valid():
             new_quantity = serializer.validated_data["quantity"]

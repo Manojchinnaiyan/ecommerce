@@ -155,6 +155,7 @@ class SearchAPIView(APIView):
         }
 
         # Cache the search results
+        # Cache the search results
         if query_text:
             cache_search_results(query_text, response_data, cache_filters)
 
@@ -203,6 +204,29 @@ class RecommendationAPIView(APIView):
             return self.get_similar_products(request, product_id, limit)
         elif category_id:
             return self.get_category_recommendations(request, category_id, limit)
+
+    def _record_recommendation_events(self, request, results, source):
+        """Record recommendation impression events"""
+        if not results:
+            return
+
+        events = []
+        for position, product_data in enumerate(results):
+            event = RecommendationEvent(
+                user=request.user if request.user.is_authenticated else None,
+                session_id=(
+                    request.session.session_key if hasattr(request, "session") else None
+                ),
+                product_id=product_data["id"],
+                event_type="impression",
+                source=source,
+                position=position,
+            )
+            events.append(event)
+
+        # Bulk create events
+        if events:
+            RecommendationEvent.objects.bulk_create(events)
 
     def get_similar_products(self, request, product_id, limit):
         try:
@@ -269,29 +293,6 @@ class RecommendationAPIView(APIView):
 
         return Response(results)
 
-    def _record_recommendation_events(self, request, results, source):
-        """Record recommendation impression events"""
-        if not results:
-            return
-
-        events = []
-        for position, product_data in enumerate(results):
-            event = RecommendationEvent(
-                user=request.user if request.user.is_authenticated else None,
-                session_id=(
-                    request.session.session_key if hasattr(request, "session") else None
-                ),
-                product_id=product_data["id"],
-                event_type="impression",
-                source=source,
-                position=position,
-            )
-            events.append(event)
-
-        # Bulk create events
-        if events:
-            RecommendationEvent.objects.bulk_create(events)
-
 
 class RecommendationEventAPIView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -311,119 +312,3 @@ class RecommendationEventAPIView(APIView):
         )
 
         return Response({"detail": "Event recorded"}, status=status.HTTP_201_CREATED)
-        results = ProductSerializer(queryset, many=True).data
-
-        # Prepare response
-        response_data = {
-            "results": results,
-            "total": total_results,
-            "page": page,
-            "limit": limit,
-            "pages": (total_results + limit - 1) // limit,  # Ceiling division
-        }
-
-        # Cache the search results
-        if query_text:
-            cache_search_results(query_text, response_data, cache_filters)
-
-        # Record search query for analytics (if authenticated)
-        if request.user.is_authenticated and query_text:
-            UserSearchQuery.objects.create(
-                user=request.user, query_text=query_text, results_count=total_results
-            )
-        # For anonymous users, we could store search with session_id
-
-        return Response(response_data)
-
-
-class RecommendationAPIView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def post(self, request):
-        serializer = RecommendationRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-        data = serializer.validated_data
-        product_id = data.get("product_id")
-        category_id = data.get("category_id")
-        limit = data.get("limit", 5)
-
-        # Check cache first
-        if product_id:
-            cached_data = cached_recommendations("product", product_id, limit)
-            if cached_data:
-                # Record impressions even for cached results
-                self._record_recommendation_events(
-                    request, cached_data, "similar_products"
-                )
-                return Response(cached_data)
-        elif category_id:
-            cached_data = cached_recommendations("category", category_id, limit)
-            if cached_data:
-                self._record_recommendation_events(
-                    request, cached_data, "category_recommendations"
-                )
-                return Response(cached_data)
-
-        # If not in cache, get recommendations
-        if product_id:
-            return self.get_similar_products(request, product_id, limit)
-        elif category_id:
-            return self.get_category_recommendations(request, category_id, limit)
-
-    def get_similar_products(self, request, product_id, limit):
-        try:
-            product = Product.objects.get(id=product_id, is_active=True)
-        except Product.DoesNotExist:
-            return Response(
-                {"detail": "Product not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        # First, try to get pre-computed similar products
-        similar_products = (
-            Product.objects.filter(
-                Q(similarities_as_b__product_a=product)
-                | Q(similarities_as_a__product_b=product),
-                is_active=True,
-            )
-            .distinct()
-            .annotate(similarity=F("similarities_as_b__similarity_score"))
-            .order_by("-similarity")[:limit]
-        )
-
-        # If no pre-computed similarities, use category and attributes
-        if not similar_products:
-            similar_products = (
-                Product.objects.filter(category=product.category, is_active=True)
-                .exclude(id=product.id)
-                .order_by("-created_at")[:limit]
-            )
-
-        # Serialize results
-        results = ProductSerializer(similar_products, many=True).data
-
-        # Cache results
-        cache_recommendations("product", product_id, results, limit)
-
-        # Record recommendation impressions
-        self._record_recommendation_events(request, results, "similar_products")
-
-        return Response(results)
-
-    def get_category_recommendations(self, request, category_id, limit):
-        try:
-            category = Category.objects.get(id=category_id)
-        except Category.DoesNotExist:
-            return Response(
-                {"detail": "Category not found"}, status=status.HTTP_404_NOT_FOUND
-            )
-
-        # Get top-rated products in category
-        top_products = (
-            Product.objects.filter(category=category, is_active=True)
-            .annotate(avg_rating=Avg("reviews__rating"))
-            .order_by("-avg_rating")[:limit]
-        )
-
-        # Serialize results

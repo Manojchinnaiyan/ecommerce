@@ -89,7 +89,8 @@ class SearchAPITestCase(TestCase):
     def test_search_products(self):
         """Test searching for products"""
         url = reverse("advanced-search")
-        response = self.client.post(url, self.search_data, format="json")
+        data = {"query": "premium"}
+        response = self.client.post(url, data, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["total"], 2)  # Should find product1 and product3

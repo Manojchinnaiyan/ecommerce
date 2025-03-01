@@ -54,14 +54,48 @@ class AddToCartSerializer(serializers.Serializer):
     def validate_product_id(self, value):
         try:
             product = ProductSerializer.Meta.model.objects.get(pk=value)
+
+            # Detailed product availability check
             if not product.is_active:
-                raise serializers.ValidationError("This product is not available.")
+                raise serializers.ValidationError(
+                    {"detail": "This product is not available."}
+                )
+
             if product.stock <= 0:
-                raise serializers.ValidationError("This product is out of stock.")
+                raise serializers.ValidationError(
+                    {"detail": "This product is out of stock."}
+                )
+
             return value
         except ProductSerializer.Meta.model.DoesNotExist:
-            raise serializers.ValidationError("Product not found.")
+            raise serializers.ValidationError({"detail": "Product not found."})
+
+    def validate(self, attrs):
+        product = ProductSerializer.Meta.model.objects.get(pk=attrs["product_id"])
+        quantity = attrs["quantity"]
+
+        # Validate quantity against available stock
+        if quantity > product.stock:
+            raise serializers.ValidationError(
+                {
+                    "detail": f"Requested quantity exceeds available stock. Only {product.stock} items available."
+                }
+            )
+
+        return attrs
 
 
 class UpdateCartItemSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1)
+
+    def validate_quantity(self, value):
+        cart_item = self.context.get("cart_item")
+
+        if cart_item:
+            # Check if requested quantity exceeds product stock
+            if value > cart_item.product.stock:
+                raise serializers.ValidationError(
+                    f"Only {cart_item.product.stock} items available."
+                )
+
+        return value

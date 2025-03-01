@@ -1,6 +1,7 @@
 version: "3.8"
 
 services:
+  # Main web application
   web:
     build:
       context: .
@@ -19,6 +20,7 @@ services:
       - redis
     restart: always
 
+  # Database service
   db:
     image: postgres:14
     volumes:
@@ -32,6 +34,18 @@ services:
     ports:
       - "5432:5432"
 
+  # Test database for running tests
+  db_test:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_DB=${DB_NAME}_test
+    tmpfs:
+      # Use tmpfs for faster testing and no persistence
+      - /var/lib/postgresql/data
+
+  # Redis for caching and Celery
   redis:
     image: redis:7
     ports:
@@ -39,6 +53,7 @@ services:
     volumes:
       - redis_data:/data
 
+  # Celery worker for background tasks
   celery:
     build:
       context: .
@@ -53,6 +68,7 @@ services:
       - redis
       - db
 
+  # Celery beat for scheduled tasks
   celery-beat:
     build:
       context: .
@@ -68,6 +84,7 @@ services:
       - db
       - celery
 
+  # Nginx for serving static files and as reverse proxy
   nginx:
     build:
       context: ./docker/nginx
@@ -78,6 +95,41 @@ services:
       - "80:80"
     depends_on:
       - web
+
+  # Testing service
+  test:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    command: python run_tests.py
+    volumes:
+      - .:/app
+    environment:
+      - DJANGO_SETTINGS_MODULE=ecommerce_api.settings
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db_test:5432/${DB_NAME}_test
+      - REDIS_URL=redis://redis:6379/1
+      - DEBUG=True
+      - TESTING=True
+    depends_on:
+      - db_test
+      - redis
+  # Development server (for local development)
+  dev:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    env_file:
+      - ./.env
+    environment:
+      - DEBUG=True
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
 
 volumes:
   postgres_data:

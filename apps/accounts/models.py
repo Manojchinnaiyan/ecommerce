@@ -57,6 +57,7 @@ class Address(models.Model):
     class Meta:
         verbose_name_plural = "Addresses"
         unique_together = [["user", "address_type", "is_default"]]
+        ordering = ["id"]
 
     def __str__(self):
         return f"{self.user.email} - {self.address_type} - {self.street_address}"

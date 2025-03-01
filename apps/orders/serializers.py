@@ -38,7 +38,6 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = "__all__"
         read_only_fields = [
-            "user",
             "order_number",
             "subtotal",
             "total",
@@ -64,7 +63,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        user = self.context["request"].user
+        # Request context is crucial here to get the user
+        user = self.context.get("request").user
 
         # Validate shipping address belongs to user
         shipping_address_id = attrs.get("shipping_address_id")
@@ -119,7 +119,11 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        user = self.context["request"].user
+        # Remove user from validated_data if present to avoid duplicate key error
+        validated_data.pop("user", None)
+
+        # Get the user from the context
+        user = self.context.get("request").user
         cart = user.cart
 
         if not cart or cart.items.count() == 0:
@@ -132,7 +136,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         tax = subtotal * 0.1
         total = subtotal + shipping_cost + tax
 
-        # Create order
+        # Create order with user explicitly passed
         order = Order.objects.create(
             user=user,
             subtotal=subtotal,

@@ -6,7 +6,7 @@ class CustomRedisClient(DefaultClient):
     Custom Redis client that adds support for pattern-based key deletion
     """
 
-    def delete_pattern(self, pattern):
+    def delete_pattern(self, pattern, **kwargs):
         """
         Delete all keys matching pattern
         """

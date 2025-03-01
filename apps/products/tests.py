@@ -142,7 +142,9 @@ class ProductsAPITestCase(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(Product.objects.count(), 2)
-        self.assertEqual(Product.objects.get(name="Test Product").price, 99.99)
+        self.assertAlmostEqual(
+            float(Product.objects.get(name="Test Product").price), 99.99, places=2
+        )
 
         # Test that regular users cannot create products
         self.client.credentials()  # Clear credentials
