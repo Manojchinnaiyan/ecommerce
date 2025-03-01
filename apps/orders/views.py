@@ -25,9 +25,9 @@ class OrderViewSet(viewsets.ModelViewSet):
             return OrderCreateSerializer
         return OrderSerializer
 
+    # Simply call save() without passing context parameter
     def perform_create(self, serializer):
-        # Add the current user to the serializer context
-        serializer.save(context={"request": self.request})
+        serializer.save()
 
     @action(detail=True, methods=["post"])
     def cancel(self, request, pk=None):

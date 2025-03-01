@@ -1,7 +1,11 @@
 from rest_framework import serializers
+from decimal import Decimal
+from django.db.models import Q
 from .models import Order, OrderItem
 from apps.products.serializers import ProductSerializer
 from apps.accounts.serializers import AddressSerializer
+from apps.accounts.models import Address
+from apps.cart.models import Cart
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -62,6 +66,12 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "shipping_cost",
         ]
 
+    def to_representation(self, instance):
+        """
+        Return complete order data after creation, including id and order_number.
+        """
+        return OrderSerializer(instance, context=self.context).data
+
     def validate(self, attrs):
         # Request context is crucial here to get the user
         user = self.context.get("request").user
@@ -69,8 +79,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         # Validate shipping address belongs to user
         shipping_address_id = attrs.get("shipping_address_id")
         try:
-            shipping_address = user.addresses.get(
-                id=shipping_address_id, address_type="shipping"
+            shipping_address = Address.objects.get(
+                id=shipping_address_id, user=user, address_type="shipping"
             )
             attrs["shipping_address"] = shipping_address
             attrs["shipping_name"] = f"{user.first_name} {user.last_name}"
@@ -79,7 +89,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             attrs["shipping_state"] = shipping_address.state
             attrs["shipping_postal_code"] = shipping_address.postal_code
             attrs["shipping_country"] = shipping_address.country
-        except user.addresses.model.DoesNotExist:
+        except Address.DoesNotExist:
             raise serializers.ValidationError(
                 {"shipping_address_id": "Invalid shipping address"}
             )
@@ -96,8 +106,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         else:
             billing_address_id = attrs.get("billing_address_id")
             try:
-                billing_address = user.addresses.get(
-                    id=billing_address_id, address_type="billing"
+                billing_address = Address.objects.get(
+                    id=billing_address_id, user=user, address_type="billing"
                 )
                 attrs["billing_address"] = billing_address
                 attrs["billing_name"] = f"{user.first_name} {user.last_name}"
@@ -106,7 +116,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 attrs["billing_state"] = billing_address.state
                 attrs["billing_postal_code"] = billing_address.postal_code
                 attrs["billing_country"] = billing_address.country
-            except user.addresses.model.DoesNotExist:
+            except Address.DoesNotExist:
                 raise serializers.ValidationError(
                     {"billing_address_id": "Invalid billing address"}
                 )
@@ -119,21 +129,25 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        # Remove user from validated_data if present to avoid duplicate key error
-        validated_data.pop("user", None)
-
         # Get the user from the context
         user = self.context.get("request").user
-        cart = user.cart
 
-        if not cart or cart.items.count() == 0:
+        # Get the cart - user OneToOneField relationship with related_name="cart"
+        try:
+            cart = user.cart
+        except Cart.DoesNotExist:
+            # Create a cart if it doesn't exist
+            cart = Cart.objects.create(user=user)
+
+        if not cart or not cart.items.exists():
             raise serializers.ValidationError({"cart": "Cart is empty"})
 
         # Calculate order totals
         subtotal = cart.subtotal
-        shipping_cost = validated_data.get("shipping_cost", 0)
-        # Calculate tax (example: 10% of subtotal)
-        tax = subtotal * 0.1
+        shipping_cost = validated_data.pop("shipping_cost", 0)
+
+        # Use Decimal instead of float for tax calculation to avoid type error
+        tax = subtotal * Decimal("0.1")
         total = subtotal + shipping_cost + tax
 
         # Create order with user explicitly passed
